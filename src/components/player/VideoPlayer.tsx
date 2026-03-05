@@ -3,9 +3,8 @@ import type { RefObject } from 'react';
 
 interface VideoPlayerProps {
   url: string;
-  playerRef: RefObject<ReactPlayer | null>;
+  playerRef: RefObject<any>;
   playing: boolean;
-  playbackRate: number;
   onProgress: (state: { playedSeconds: number }) => void;
   onDuration: (duration: number) => void;
   onPlay: () => void;
@@ -16,7 +15,6 @@ export default function VideoPlayer({
   url,
   playerRef,
   playing,
-  playbackRate,
   onProgress,
   onDuration,
   onPlay,
@@ -28,8 +26,7 @@ export default function VideoPlayer({
         ref={playerRef}
         url={url}
         playing={playing}
-        playbackRate={playbackRate}
-        onProgress={onProgress}
+        onProgress={onProgress as any}
         onDuration={onDuration}
         onPlay={onPlay}
         onPause={onPause}
@@ -44,7 +41,7 @@ export default function VideoPlayer({
               rel: 0,
             },
           },
-        }}
+        } as any}
       />
     </div>
   );

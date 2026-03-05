@@ -1,7 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import YouTubeInput from '../components/player/YouTubeInput';
 import VideoPlayer from '../components/player/VideoPlayer';
-import SpeedControl from '../components/player/SpeedControl';
 import LyricsPanel from '../components/lyrics/LyricsPanel';
 import { usePlayer } from '../hooks/usePlayer';
 import { useSynchronizedLyrics } from '../hooks/useSynchronizedLyrics';
@@ -15,6 +15,19 @@ export default function HomePage() {
   const { song, loading: songLoading, processingStatus, error: songError, loadSong } = useSong();
   const { saveWord } = useVocabulary();
   const player = usePlayer();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Auto-load song when navigating from Browse page
+  const songUrlFromState = (location.state as { songUrl?: string })?.songUrl;
+  useEffect(() => {
+    if (songUrlFromState) {
+      loadSong(songUrlFromState);
+      // Clear the state so back/forward doesn't re-trigger
+      navigate('/', { replace: true, state: {} });
+    }
+  }, [songUrlFromState, loadSong, navigate]);
+
   const { currentLineIndex } = useSynchronizedLyrics(
     song?.lyrics || [],
     player.playedSeconds
@@ -50,7 +63,7 @@ export default function HomePage() {
         <YouTubeInput
           onSubmit={loadSong}
           loading={songLoading}
-          defaultUrl="https://www.youtube.com/watch?v=HegSBovl24I"
+          defaultUrl={songUrlFromState || 'https://www.youtube.com/watch?v=HegSBovl24I'}
         />
         {songError && <p className="mt-2 text-sm text-china-red">{songError}</p>}
         {processingStatus && (
@@ -64,7 +77,7 @@ export default function HomePage() {
       {/* Main Content */}
       {song ? (
         <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
-          {/* Left Column: Video + Controls */}
+          {/* Left Column: Video */}
           <div className="space-y-4">
             {/* Song Info */}
             <div className="flex items-center gap-3">
@@ -86,17 +99,10 @@ export default function HomePage() {
               url={song.youtubeUrl}
               playerRef={player.playerRef}
               playing={player.playing}
-              playbackRate={player.playbackRate}
               onProgress={player.handleProgress}
               onDuration={player.handleDuration}
               onPlay={() => player.setPlaying(true)}
               onPause={() => player.setPlaying(false)}
-            />
-
-            {/* Speed Control */}
-            <SpeedControl
-              currentSpeed={player.playbackRate}
-              onSpeedChange={player.setPlaybackRate}
             />
           </div>
 
@@ -135,8 +141,8 @@ export default function HomePage() {
             </div>
             <div className="rounded-xl border border-white/5 bg-bg-card p-4 text-center">
               <Zap className="mx-auto h-8 w-8 text-china-red/60" />
-              <p className="mt-2 text-sm font-medium">Speed Control</p>
-              <p className="mt-1 text-xs text-text-secondary">Slow down to catch every word</p>
+              <p className="mt-2 text-sm font-medium">Learn Anywhere</p>
+              <p className="mt-1 text-xs text-text-secondary">Works on any device, any time</p>
             </div>
           </div>
         </div>

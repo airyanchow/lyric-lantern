@@ -26,7 +26,7 @@ export function useSong(): UseSongReturn {
   const incrementViewCount = (videoId: string) => {
     try {
       if (isSupabaseConfigured()) {
-        supabase.rpc('increment_view_count', { p_video_id: videoId }).catch(() => {});
+        supabase.rpc('increment_view_count', { p_video_id: videoId }).then(() => {}).catch(() => {});
       }
     } catch {
       // Silently ignore
