@@ -5,6 +5,8 @@ import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import BrowsePage from './pages/BrowsePage';
 import VocabularyPage from './pages/VocabularyPage';
+import PrivacyPage from './pages/PrivacyPage';
+import TermsPage from './pages/TermsPage';
 import AuthGuard from './components/auth/AuthGuard';
 
 const router = createBrowserRouter([
@@ -31,6 +33,14 @@ const router = createBrowserRouter([
             <VocabularyPage />
           </AuthGuard>
         ),
+      },
+      {
+        path: 'privacy',
+        element: <PrivacyPage />,
+      },
+      {
+        path: 'terms',
+        element: <TermsPage />,
       },
     ],
   },
