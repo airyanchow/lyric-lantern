@@ -1,12 +1,12 @@
 import { useRef, useState, useCallback } from 'react';
 export function usePlayer() {
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<YT.Player | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playedSeconds, setPlayedSeconds] = useState(0);
   const [duration, setDuration] = useState(0);
 
   const seekTo = useCallback((seconds: number) => {
-    playerRef.current?.seekTo(seconds, 'seconds');
+    playerRef.current?.seekTo(seconds, true);
     setPlayedSeconds(seconds);
   }, []);
 
