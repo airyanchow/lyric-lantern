@@ -115,11 +115,15 @@ export default function PrivacyPage() {
           <h2 className="text-xl font-semibold text-text-primary">10. Contact Us</h2>
           <p className="mt-3">
             If you have any questions about this Privacy Policy, please contact us at{' '}
-            <a href="mailto:airyanchow@gmail.com" className="text-china-red hover:underline">
-              airyanchow@gmail.com
+            <a href="mailto:info@lyriclantern.com" className="text-china-red hover:underline">
+              info@lyriclantern.com
             </a>.
           </p>
         </section>
+
+        <p className="mt-8 pt-6 border-t border-white/10 text-center text-xs">
+          &copy; 2026 LyricLantern. All rights reserved.
+        </p>
       </div>
     </div>
   );
