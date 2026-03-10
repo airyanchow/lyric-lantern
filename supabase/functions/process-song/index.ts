@@ -65,17 +65,99 @@ async function fetchYouTubeMetadata(
   };
 }
 
+// ─── 1b. Traditional → Simplified Chinese conversion ────────────────────────
+// Compact mapping of the most common Traditional characters that differ in Simplified
+// Covers ~500 high-frequency characters used in song titles and artist names
+const TRAD_TO_SIMP: Record<string, string> = {
+  "東":"东","車":"车","長":"长","門":"门","馬":"马","風":"风","時":"时","從":"从",
+  "書":"书","見":"见","來":"来","後":"后","開":"开","頭":"头","過":"过","對":"对",
+  "電":"电","點":"点","學":"学","現":"现","說":"说","請":"请","問":"问","間":"间",
+  "動":"动","進":"进","種":"种","經":"经","發":"发","話":"话","體":"体","樂":"乐",
+  "機":"机","與":"与","無":"无","區":"区","場":"场","將":"将","關":"关","為":"为",
+  "義":"义","親":"亲","裡":"里","認":"认","條":"条","離":"离","難":"难","讓":"让",
+  "應":"应","邊":"边","愛":"爱","聽":"听","華":"华","語":"语","歲":"岁","實":"实",
+  "歡":"欢","節":"节","論":"论","連":"连","飛":"飞","戰":"战","詞":"词","傳":"传",
+  "遠":"远","鳥":"鸟","龍":"龙","雲":"云","夢":"梦","師":"师","陽":"阳","國":"国",
+  "會":"会","記":"记","設":"设","許":"许","響":"响","轉":"转","達":"达","網":"网",
+  "態":"态","環":"环","歷":"历","勝":"胜","園":"园","觀":"观","單":"单","習":"习",
+  "廣":"广","當":"当","產":"产","運":"运","給":"给","滿":"满","導":"导","線":"线",
+  "號":"号","寫":"写","護":"护","銀":"银","練":"练","選":"选","歸":"归","誰":"谁",
+  "舊":"旧","滿":"满","燈":"灯","擊":"击","劍":"剑","類":"类","蘭":"兰","麗":"丽",
+  "齊":"齐","鐵":"铁","隨":"随","壞":"坏","歲":"岁","聲":"声","際":"际","軍":"军",
+  "農":"农","雜":"杂","緊":"紧","創":"创","優":"优","廳":"厅","報":"报","標":"标",
+  "總":"总","結":"结","獨":"独","準":"准","絕":"绝","預":"预","構":"构","極":"极",
+  "確":"确","組":"组","變":"变","顯":"显","議":"议","齡":"龄","續":"续","獲":"获",
+  "該":"该","財":"财","質":"质","營":"营","環":"环","層":"层","識":"识","額":"额",
+  "資":"资","職":"职","擁":"拥","異":"异","買":"买","禮":"礼","認":"认","擇":"择",
+  "嗎":"吗","錢":"钱","備":"备","溫":"温","願":"愿","醒":"醒","歸":"归","臉":"脸",
+  "葉":"叶","寶":"宝","傷":"伤","勞":"劳","傑":"杰","雞":"鸡","魚":"鱼","黃":"黄",
+  "鬥":"斗","齒":"齿","稱":"称","靈":"灵","傳":"传","舉":"举","歲":"岁","細":"细",
+  "輕":"轻","輪":"轮","鏡":"镜","紅":"红","綠":"绿","藍":"蓝","銀":"银","補":"补",
+  "陰":"阴","裝":"装","復":"复","複":"复","誤":"误","終":"终","斷":"断","歡":"欢",
+  "顏":"颜","豐":"丰","夠":"够","鍵":"键","碼":"码","課":"课","樣":"样","處":"处",
+  "業":"业","獎":"奖","們":"们","圖":"图","勢":"势","塊":"块","屬":"属","據":"据",
+  "壓":"压","導":"导","禦":"御","簡":"简","靜":"静","嘆":"叹","盡":"尽","慶":"庆",
+  "僅":"仅","傳":"传","劃":"划","網":"网","歐":"欧","覺":"觉","係":"系",
+};
+
+function traditionalToSimplified(text: string): string {
+  let result = "";
+  for (const char of text) {
+    result += TRAD_TO_SIMP[char] || char;
+  }
+  return result;
+}
+
+// ─── 1c. Extract artist from YouTube title ──────────────────────────────────
+// When the YouTube channel is a music aggregator, extract the real artist from the title
+function extractArtistFromTitle(title: string, channelName: string): string | null {
+  // Check if the channel name looks like a music aggregator/lyrics channel
+  const aggregatorPatterns = /music\s*channel|lyrics?\s*channel|official\s*mv|music\s*video|song\s*channel|bella\s*ping|歌詞|lyric/i;
+  if (!aggregatorPatterns.test(channelName)) return null;
+
+  // Pattern: "ArtistName - SongTitle" or "ArtistName-SongTitle"
+  const dashMatch = title.match(/^(.+?)\s*[-–—]\s*.+/);
+  if (dashMatch) {
+    const candidate = dashMatch[1].trim();
+    // Don't return if it's too long (probably not just an artist name)
+    if (candidate.length <= 30) return candidate;
+  }
+
+  return null;
+}
+
 // ─── 2. Fetch synced lyrics from LRCLIB ─────────────────────────────────────
 
+// Non-song bracket content patterns (skip these when extracting song names)
+const NON_SONG_BRACKET = /歌詞|字幕|完整|高清|音質|動態|lyrics?|subtitle|hd|hq|full|audio|1080|720|4k/i;
+
 // Extract the song name from various YouTube title formats
-// e.g. "周杰倫 Jay Chou【晴天 Sunny Day】-Official Music Video" → "晴天"
+// Handles: "Artist - Song【brackets】", "Artist《Song》", "Song (version) MV", etc.
 function extractSongName(title: string, artist: string): string[] {
   const candidates: string[] = [];
 
-  // 1. Extract text from CJK brackets: 【...】〈...〉《...》
-  const cjkBracketMatch = title.match(/[【《〈](.+?)[】》〉]/);
-  if (cjkBracketMatch) {
-    const insideBrackets = cjkBracketMatch[1].trim();
+  // 0. Try "Artist - SongName" dash pattern FIRST (very common for Chinese music channels)
+  // e.g. "繁音 - 北京東路的日子 (獨唱版)【歌詞字幕】" → "北京東路的日子"
+  const dashMatch = title.match(/^.+?\s*[-–—]\s*(.+?)(?:\s*[\(（].+?[\)）])?\s*(?:[【《\[「♪]|$)/);
+  if (dashMatch) {
+    const songFromDash = dashMatch[1].trim();
+    if (songFromDash.length > 1 && songFromDash.length < 40) {
+      candidates.push(songFromDash);
+      // Also try simplified version
+      const simplified = traditionalToSimplified(songFromDash);
+      if (simplified !== songFromDash) candidates.push(simplified);
+    }
+  }
+
+  // 1. Extract text from CJK brackets: 【...】〈...〉《...》「...」
+  const allBracketMatches = title.matchAll(/[【《〈「](.+?)[】》〉」]/g);
+  for (const m of allBracketMatches) {
+    const insideBrackets = m[1].trim();
+    // Skip non-song content like "歌詞字幕", "完整高清音質", etc.
+    if (NON_SONG_BRACKET.test(insideBrackets)) continue;
+    // Skip if it looks like a quote/lyric excerpt (contains "...")
+    if (insideBrackets.includes("...") || insideBrackets.includes("…")) continue;
+
     candidates.push(insideBrackets);
     // If it contains both Chinese and English (e.g. "晴天 Sunny Day"), extract just the Chinese part
     const chinesePart = insideBrackets.replace(/[a-zA-Z\s'-]+$/g, "").trim();
@@ -87,11 +169,16 @@ function extractSongName(title: string, artist: string): string[] {
     if (englishPart && englishPart !== insideBrackets) {
       candidates.push(englishPart);
     }
+    // Also try simplified version
+    const simplified = traditionalToSimplified(insideBrackets);
+    if (simplified !== insideBrackets) candidates.push(simplified);
+    break; // Only use the first valid bracket match
   }
 
   // 2. Clean the full title: remove ALL bracket types and their contents
   const cleaned = title
-    .replace(/\s*[【《〈\(\[\{].*?[】》〉\)\]\}]\s*/g, " ")
+    .replace(/\s*[【《〈「\(\[\{].*?[】》〉」\)\]\}]\s*/g, " ")
+    .replace(/\s*♪.*$/g, "") // Remove ♪ and everything after
     .replace(/\s*[-–—]\s*official\s*(mv|music\s*video|video|audio|lyric\s*video).*$/gi, "")
     .replace(/\s*official\s*(mv|music\s*video|video|audio|lyric\s*video)\s*/gi, "")
     .replace(/\s*[-–—]\s*MV\s*$/gi, "")
@@ -100,24 +187,29 @@ function extractSongName(title: string, artist: string): string[] {
 
   // 3. Remove artist name prefix from the cleaned title
   if (artist) {
-    // Try removing the artist name (and common separators) from the start
     const artistVariants = [artist];
-    // Also try just the Chinese part of the artist name
     const artistChinese = artist.replace(/[a-zA-Z\s'-]+/g, "").trim();
     if (artistChinese) artistVariants.push(artistChinese);
-    // Also try just the English part
-    const artistEnglish = artist.replace(/[\u4e00-\u9fff\u3400-\u4dbf\s]+/g, "").trim();
+    const artistEnglish = artist.replace(/[\u4e00-\u9fff\u3400-\u4dbf]+/g, "").trim();
     if (artistEnglish) artistVariants.push(artistEnglish);
 
     for (const av of artistVariants) {
       if (cleaned.toLowerCase().startsWith(av.toLowerCase())) {
         const remainder = cleaned.substring(av.length).replace(/^\s*[-–—:：]\s*/, "").trim();
-        if (remainder) candidates.push(remainder);
+        if (remainder) {
+          candidates.push(remainder);
+          const simpRemainder = traditionalToSimplified(remainder);
+          if (simpRemainder !== remainder) candidates.push(simpRemainder);
+        }
       }
     }
   }
 
-  if (cleaned) candidates.push(cleaned);
+  if (cleaned) {
+    candidates.push(cleaned);
+    const simpCleaned = traditionalToSimplified(cleaned);
+    if (simpCleaned !== cleaned) candidates.push(simpCleaned);
+  }
 
   // Deduplicate while preserving order
   return [...new Set(candidates)].filter(c => c.length > 0);
@@ -132,7 +224,16 @@ function cleanArtistName(artist: string): string[] {
   // English part only (e.g. "Jay Chou")
   const english = artist.replace(/[\u4e00-\u9fff\u3400-\u4dbf]+/g, "").trim();
   if (english && english !== artist) variants.push(english);
-  return variants;
+  // Simplified versions
+  const simpArtist = traditionalToSimplified(artist);
+  if (simpArtist !== artist) variants.push(simpArtist);
+  if (chinese) {
+    const simpChinese = traditionalToSimplified(chinese);
+    if (simpChinese !== chinese) variants.push(simpChinese);
+  }
+  // Add 群星 (Various Artists) as a last resort
+  variants.push("群星");
+  return [...new Set(variants)];
 }
 
 async function fetchLRCLyrics(
@@ -760,6 +861,13 @@ Deno.serve(async (req: Request) => {
         artist = meta.artist;
         thumbnailUrl = meta.thumbnailUrl;
         console.log(`YouTube metadata: "${title}" by ${artist}`);
+
+        // If the channel is a music aggregator, try to extract real artist from title
+        const titleArtist = extractArtistFromTitle(title, artist);
+        if (titleArtist) {
+          console.log(`Detected aggregator channel, using artist from title: "${titleArtist}"`);
+          artist = titleArtist;
+        }
       } catch (e) {
         youtubeError = e.message || String(e);
         console.error("YouTube metadata fetch failed:", youtubeError);
