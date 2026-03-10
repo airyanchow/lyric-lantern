@@ -834,15 +834,18 @@ Deno.serve(async (req: Request) => {
       .eq("video_id", videoId)
       .single();
 
-    if (existing && Array.isArray(existing.lyrics) && existing.lyrics.length > 0) {
-      return new Response(JSON.stringify(existing), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (existing) {
+      const hasLyrics = Array.isArray(existing.lyrics) && existing.lyrics.length > 0;
 
-    // If cached but has empty lyrics, delete the bad entry so we can retry
-    if (existing && (!existing.lyrics || existing.lyrics.length === 0)) {
-      console.log("Found cached entry with empty lyrics, deleting to retry...");
+      if (hasLyrics) {
+        // Serve cached version
+        return new Response(JSON.stringify(existing), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Bad entry (empty lyrics) — always delete so we can retry with improved sources
+      console.log("Found cached entry with empty/missing lyrics, deleting to retry...");
       await supabase.from("songs").delete().eq("video_id", videoId);
     }
 
