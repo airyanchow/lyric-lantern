@@ -108,12 +108,22 @@ export function useSong(): UseSongReturn {
         body: JSON.stringify({ videoId, youtubeUrl: url }),
       });
 
-      const processedData = await response.json();
+      let processedData: any;
+      try {
+        processedData = await response.json();
+      } catch {
+        // Response body wasn't valid JSON
+        throw new Error('SERVICE_UNAVAILABLE');
+      }
 
       // Check for error responses (non-2xx or error field in response)
       if (!response.ok || processedData?.error) {
-        const errorMsg = processedData?.error || `Server error (${response.status})`;
-        throw new Error(errorMsg);
+        // If the edge function returned a specific lyrics-not-found error, pass it through
+        if (response.status === 404 && processedData?.error) {
+          throw new Error(processedData.error);
+        }
+        // Everything else gets a generic user-friendly message
+        throw new Error('SERVICE_UNAVAILABLE');
       }
 
       if (processedData) {
@@ -133,13 +143,17 @@ export function useSong(): UseSongReturn {
       const message = err?.message || 'An error occurred';
       console.warn('Song loading error:', message);
 
-      // Show a user-friendly error instead of falling back to demo
-      if (message.includes('synced lyrics') || message.includes('No Chinese lyrics')) {
-        setError(message);
-      } else if (message.includes('OpenAI') || message.includes('API')) {
-        setError('The lyrics processing service is currently unavailable. Please try again later.');
+      // Show user-friendly error messages
+      if (message === 'SERVICE_UNAVAILABLE') {
+        setError('Song cannot be translated at this time. Please check back again later.');
+      } else if (message.includes('Could not find lyrics')) {
+        setError('Song cannot be translated at this time. Please check back again later.');
+      } else if (message.includes('No Chinese lyrics')) {
+        setError('Song cannot be translated at this time. Please check back again later.');
+      } else if (message.includes('Invalid YouTube URL') || message.includes('Invalid video ID')) {
+        setError('Invalid YouTube URL. Please check the URL and try again.');
       } else {
-        setError(`Failed to load song: ${message}`);
+        setError('Song cannot be translated at this time. Please check back again later.');
       }
     }
 
