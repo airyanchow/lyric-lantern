@@ -1,5 +1,5 @@
 // LyricLantern — process-song Edge Function
-// Pipeline: YouTube metadata → LRCLIB synced lyrics → OpenAI GPT-4o-mini → cache in Supabase
+// Pipeline: YouTube metadata → lyrics search (LRCLIB → NetEase → YT captions → AI web search) → OpenAI GPT-4o-mini → cache in Supabase
 //
 // Supabase secrets required:
 //   OPENAI_API_KEY   – OpenAI API key
@@ -201,6 +201,87 @@ async function fetchLRCLyrics(
   return null;
 }
 
+// ─── 2c. Fetch lyrics from NetEase Cloud Music ──────────────────────────────
+
+async function fetchNetEaseLyrics(
+  title: string,
+  artist: string
+): Promise<string | null> {
+  const songNames = extractSongName(title, artist);
+  const artistVariants = cleanArtistName(artist);
+
+  // Build search queries — try best song name + artist combinations
+  const searchQueries: string[] = [];
+  const bestName = songNames[0];
+  if (bestName) {
+    for (const av of artistVariants.slice(0, 2)) {
+      searchQueries.push(`${av} ${bestName}`);
+    }
+    searchQueries.push(bestName);
+  }
+  // Also try Chinese-only song name if available
+  if (songNames[1] && songNames[1] !== bestName) {
+    searchQueries.push(songNames[1]);
+  }
+
+  for (const query of searchQueries) {
+    try {
+      console.log(`NetEase searching: "${query}"`);
+      const searchRes = await fetch("http://music.163.com/api/search/get/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": "http://music.163.com",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Cookie": "appver=2.0.2;",
+        },
+        body: `s=${encodeURIComponent(query)}&type=1&limit=5&offset=0`,
+      });
+
+      if (!searchRes.ok) {
+        console.warn(`NetEase search HTTP ${searchRes.status}`);
+        continue;
+      }
+
+      const searchData = await searchRes.json();
+      const songs = searchData?.result?.songs;
+      if (!songs || songs.length === 0) continue;
+
+      // Try each search result for lyrics
+      for (const song of songs.slice(0, 3)) {
+        try {
+          const lyricRes = await fetch(
+            `http://music.163.com/api/song/lyric?os=osx&id=${song.id}&lv=-1&kv=-1&tv=-1`,
+            {
+              headers: {
+                "Referer": "http://music.163.com",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              },
+            }
+          );
+
+          if (!lyricRes.ok) continue;
+
+          const lyricData = await lyricRes.json();
+          const lrcContent = lyricData?.lrc?.lyric;
+
+          if (lrcContent && lrcContent.includes("[") && containsChinese(lrcContent)) {
+            console.log(`NetEase match: "${song.name}" by ${song.artists?.map((a: any) => a.name).join(", ")} (id: ${song.id})`);
+            return lrcContent;
+          }
+        } catch (e) {
+          console.warn(`NetEase lyric fetch failed for song ${song.id}:`, e);
+        }
+      }
+    } catch (e) {
+      console.warn("NetEase search failed:", e);
+    }
+  }
+
+  console.log("No lyrics found on NetEase");
+  return null;
+}
+
 // ─── 3. Parse LRC format into timed lines ───────────────────────────────────
 function parseLRC(lrc: string): { time: number; text: string }[] {
   const lines: { time: number; text: string }[] = [];
@@ -374,6 +455,94 @@ async function fetchYouTubeCaptions(
     return chineseLines;
   } catch (e) {
     console.warn("YouTube captions fetch error:", e);
+    return null;
+  }
+}
+
+// ─── 2d. AI web search for lyrics (last resort) ─────────────────────────────
+
+async function fetchLyricsViaAI(
+  title: string,
+  artist: string,
+  apiKey: string
+): Promise<{ time: number; text: string }[] | null> {
+  try {
+    const songNames = extractSongName(title, artist);
+    const bestName = songNames[0] || title;
+    const artistClean = cleanArtistName(artist)[0] || artist;
+
+    console.log(`AI web search for lyrics: "${bestName}" by ${artistClean}`);
+
+    const prompt = `Find the complete Chinese lyrics for the song "${bestName}" by ${artistClean}.
+
+Return ONLY the Chinese lyrics text, one line per line. Do not include:
+- Translations or pinyin
+- Song metadata (writer, composer, etc.)
+- Section headers like [Chorus], [Verse], etc.
+- Any explanation or commentary
+
+If you cannot find the lyrics, respond with exactly: NOT_FOUND`;
+
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are a lyrics search assistant. You have extensive knowledge of Chinese songs and their lyrics. When asked for lyrics, provide the complete Chinese lyrics text only.",
+          },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.1,
+        max_tokens: 4000,
+      }),
+    });
+
+    if (!res.ok) {
+      console.warn(`AI lyrics search HTTP ${res.status}`);
+      return null;
+    }
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content?.trim();
+
+    if (!content || content === "NOT_FOUND" || content.includes("NOT_FOUND")) {
+      console.log("AI could not find lyrics");
+      return null;
+    }
+
+    // Check that the response actually contains Chinese characters
+    if (!containsChinese(content)) {
+      console.log("AI response does not contain Chinese characters");
+      return null;
+    }
+
+    // Split into lines and create untimed entries (time=0 for all)
+    const lines = content
+      .split("\n")
+      .map((l: string) => l.trim())
+      .filter((l: string) => l.length > 0 && containsChinese(l));
+
+    if (lines.length < 3) {
+      console.log(`AI returned only ${lines.length} Chinese lines, too few`);
+      return null;
+    }
+
+    // Create timed lines with even spacing (no real timing, but maintains structure)
+    const timedLines = lines.map((text: string, i: number) => ({
+      time: i * 4, // ~4 seconds per line as placeholder
+      text,
+    }));
+
+    console.log(`AI found ${timedLines.length} lyrics lines`);
+    return timedLines;
+  } catch (e) {
+    console.warn("AI lyrics search error:", e);
     return null;
   }
 }
@@ -610,12 +779,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Step 2: Fetch synced lyrics from LRCLIB
-    let syncedLyrics: string | null = null;
+    // Step 2: Multi-source lyrics search (LRCLIB → NetEase → YouTube Captions → AI)
+    let timedLines: { time: number; text: string }[] | null = null;
+    let lyricsSource = "unknown";
+
+    // Source 1: LRCLIB
     try {
-      syncedLyrics = await fetchLRCLyrics(title, artist);
+      const syncedLyrics = await fetchLRCLyrics(title, artist);
       if (syncedLyrics) {
-        console.log("Found synced lyrics on LRCLIB");
+        timedLines = parseLRC(syncedLyrics);
+        lyricsSource = "LRCLIB";
+        console.log(`Found ${timedLines.length} timed lines from LRCLIB`);
       } else {
         console.log("No synced lyrics found on LRCLIB");
       }
@@ -623,28 +797,61 @@ Deno.serve(async (req: Request) => {
       console.warn("LRCLIB fetch failed:", e);
     }
 
-    // Step 3: Build timed lines from LRCLIB or YouTube captions fallback
-    let timedLines: { time: number; text: string }[];
-
-    if (syncedLyrics) {
-      timedLines = parseLRC(syncedLyrics);
-      console.log(`Parsed ${timedLines.length} timed lyric lines from LRCLIB`);
-    } else {
-      // Step 2b: Try YouTube captions as fallback
-      console.log("Trying YouTube captions as fallback...");
-      const captionLines = await fetchYouTubeCaptions(videoId);
-      if (captionLines && captionLines.length > 0) {
-        timedLines = captionLines;
-        console.log(`Got ${timedLines.length} lines from YouTube captions`);
-      } else {
-        return new Response(
-          JSON.stringify({
-            error: "Could not find lyrics for this song. No results on LRCLIB and no Chinese captions available on YouTube.",
-          }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+    // Source 2: NetEase Cloud Music
+    if (!timedLines || timedLines.length === 0) {
+      try {
+        const neteaseLyrics = await fetchNetEaseLyrics(title, artist);
+        if (neteaseLyrics) {
+          timedLines = parseLRC(neteaseLyrics);
+          lyricsSource = "NetEase";
+          console.log(`Found ${timedLines.length} timed lines from NetEase`);
+        }
+      } catch (e) {
+        console.warn("NetEase fetch failed:", e);
       }
     }
+
+    // Source 3: YouTube Captions
+    if (!timedLines || timedLines.length === 0) {
+      console.log("Trying YouTube captions as fallback...");
+      try {
+        const captionLines = await fetchYouTubeCaptions(videoId);
+        if (captionLines && captionLines.length > 0) {
+          timedLines = captionLines;
+          lyricsSource = "YouTube Captions";
+          console.log(`Found ${timedLines.length} lines from YouTube captions`);
+        }
+      } catch (e) {
+        console.warn("YouTube captions fetch failed:", e);
+      }
+    }
+
+    // Source 4: AI web search (last resort — uses OpenAI to find lyrics by title/artist)
+    if (!timedLines || timedLines.length === 0) {
+      console.log("Trying AI lyrics search as last resort...");
+      try {
+        const aiLines = await fetchLyricsViaAI(title, artist, openaiKey);
+        if (aiLines && aiLines.length > 0) {
+          timedLines = aiLines;
+          lyricsSource = "AI Search";
+          console.log(`Found ${timedLines.length} lines via AI search`);
+        }
+      } catch (e) {
+        console.warn("AI lyrics search failed:", e);
+      }
+    }
+
+    // If all sources failed, return 404
+    if (!timedLines || timedLines.length === 0) {
+      return new Response(
+        JSON.stringify({
+          error: "Could not find lyrics for this song from any source.",
+        }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log(`Using lyrics from: ${lyricsSource} (${timedLines.length} lines)`);
 
     // Step 4: Process with OpenAI (pinyin + translations + word segmentation)
     let lyrics: LyricLine[];
