@@ -3,13 +3,23 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import YouTubeInput from '../components/player/YouTubeInput';
 import VideoPlayer from '../components/player/VideoPlayer';
 import LyricsPanel from '../components/lyrics/LyricsPanel';
+import SongCardCompact from '../components/songs/SongCardCompact';
 import { usePlayer } from '../hooks/usePlayer';
 import { useSynchronizedLyrics } from '../hooks/useSynchronizedLyrics';
 import { useSong } from '../hooks/useSong';
 import { useVocabulary } from '../hooks/useVocabulary';
+import { supabase } from '../lib/supabase';
 import { Music, BookOpen, Zap } from 'lucide-react';
 import ChineseLantern from '../components/icons/ChineseLantern';
 import type { LyricWord } from '../types';
+
+interface PopularSong {
+  id: string;
+  title: string;
+  artist: string;
+  thumbnail_url: string;
+  youtube_url: string;
+}
 
 export default function HomePage() {
   const { song, loading: songLoading, processingStatus, error: songError, loadSong } = useSong();
@@ -17,6 +27,18 @@ export default function HomePage() {
   const player = usePlayer();
   const location = useLocation();
   const navigate = useNavigate();
+  const [popularSongs, setPopularSongs] = useState<PopularSong[]>([]);
+
+  // Fetch top 20 popular songs for the landing page
+  useEffect(() => {
+    supabase
+      .from('songs')
+      .select('id, title, artist, thumbnail_url, youtube_url')
+      .order('view_count', { ascending: false })
+      .limit(20)
+      .then(({ data }) => { if (data) setPopularSongs(data); })
+      .catch(() => {});
+  }, []);
 
   // Auto-load song when navigating from Browse page
   const songUrlFromState = (location.state as { songUrl?: string })?.songUrl;
@@ -63,7 +85,7 @@ export default function HomePage() {
         <YouTubeInput
           onSubmit={loadSong}
           loading={songLoading}
-          defaultUrl={songUrlFromState || 'https://www.youtube.com/watch?v=HegSBovl24I'}
+          defaultUrl={songUrlFromState || ''}
         />
         {songError && <p className="mt-2 text-sm text-china-red">{songError}</p>}
         {processingStatus && (
@@ -145,6 +167,24 @@ export default function HomePage() {
               <p className="mt-1 text-xs text-text-secondary">Works on any device, any time</p>
             </div>
           </div>
+
+          {/* Popular Songs */}
+          {popularSongs.length > 0 && (
+            <div className="mt-12 w-full max-w-5xl">
+              <h2 className="mb-4 text-lg font-semibold">Popular Songs</h2>
+              <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-thin">
+                {popularSongs.map((s) => (
+                  <SongCardCompact
+                    key={s.id}
+                    title={s.title}
+                    artist={s.artist}
+                    thumbnailUrl={s.thumbnail_url}
+                    onClick={() => loadSong(s.youtube_url)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

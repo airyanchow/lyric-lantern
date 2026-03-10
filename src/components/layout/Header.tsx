@@ -29,7 +29,7 @@ export default function Header() {
             className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-text-primary no-underline"
           >
             <TrendingUp className="h-4 w-4" />
-            <span className="hidden sm:inline">Top Songs</span>
+            <span className="hidden sm:inline">Top 100</span>
           </Link>
           {user && (
             <Link

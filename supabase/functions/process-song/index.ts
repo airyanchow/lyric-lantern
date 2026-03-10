@@ -226,6 +226,158 @@ function parseLRC(lrc: string): { time: number; text: string }[] {
   return lines;
 }
 
+// ─── 2b. Fetch lyrics from YouTube captions (fallback) ──────────────────────
+
+function decodeHTMLEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(parseInt(code, 10)))
+    .replace(/\n/g, " ")
+    .trim();
+}
+
+function parseTimedTextXML(xml: string): { time: number; text: string }[] {
+  const lines: { time: number; text: string }[] = [];
+  const regex = /<text\s+start="([^"]+)"\s+dur="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g;
+  let match;
+  while ((match = regex.exec(xml)) !== null) {
+    const time = parseFloat(match[1]);
+    const text = decodeHTMLEntities(match[3]);
+    if (text) {
+      lines.push({ time, text });
+    }
+  }
+  return lines;
+}
+
+async function fetchYouTubeCaptions(
+  videoId: string
+): Promise<{ time: number; text: string }[] | null> {
+  try {
+    // Fetch the YouTube video page to extract caption track URLs
+    const pageUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const res = await fetch(pageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`YouTube page fetch failed: ${res.status}`);
+      return null;
+    }
+
+    const html = await res.text();
+
+    // Extract captionTracks from ytInitialPlayerResponse
+    const playerMatch = html.match(
+      /ytInitialPlayerResponse\s*=\s*(\{.+?\});/s
+    );
+    if (!playerMatch) {
+      console.warn("Could not find ytInitialPlayerResponse in page");
+      return null;
+    }
+
+    let playerData: any;
+    try {
+      playerData = JSON.parse(playerMatch[1]);
+    } catch {
+      console.warn("Failed to parse ytInitialPlayerResponse JSON");
+      return null;
+    }
+
+    const captionTracks =
+      playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    if (!captionTracks || captionTracks.length === 0) {
+      console.log("No caption tracks found for this video");
+      return null;
+    }
+
+    console.log(
+      `Found ${captionTracks.length} caption tracks:`,
+      captionTracks.map((t: any) => `${t.languageCode} (${t.kind || "manual"})`)
+    );
+
+    // Priority order for Chinese captions
+    const zhCodes = ["zh", "zh-Hans", "zh-CN", "zh-Hant", "zh-TW"];
+
+    // Priority 1: Manual Chinese captions
+    let track = captionTracks.find(
+      (t: any) => zhCodes.includes(t.languageCode) && t.kind !== "asr"
+    );
+
+    // Priority 2: Auto-generated Chinese captions
+    if (!track) {
+      track = captionTracks.find(
+        (t: any) => zhCodes.includes(t.languageCode) && t.kind === "asr"
+      );
+    }
+
+    // Priority 3: Any caption track that might contain Chinese (e.g. "und" or default)
+    if (!track) {
+      track = captionTracks.find(
+        (t: any) => t.kind !== "asr" && !["en", "es", "fr", "de", "ja", "ko", "pt", "ru"].includes(t.languageCode)
+      );
+    }
+
+    // Priority 4: Auto-generated in any language (we'll filter for Chinese content later)
+    if (!track) {
+      track = captionTracks.find((t: any) => t.kind === "asr");
+    }
+
+    if (!track) {
+      console.log("No suitable caption track found");
+      return null;
+    }
+
+    console.log(
+      `Using caption track: ${track.languageCode} (${track.kind || "manual"})`
+    );
+
+    // Fetch the caption XML
+    const captionUrl = track.baseUrl + "&fmt=srv3";
+    const captionRes = await fetch(captionUrl);
+    if (!captionRes.ok) {
+      console.warn(`Caption fetch failed: ${captionRes.status}`);
+      return null;
+    }
+
+    const captionXml = await captionRes.text();
+    const lines = parseTimedTextXML(captionXml);
+
+    if (lines.length === 0) {
+      console.log("No lines parsed from caption XML");
+      return null;
+    }
+
+    // Filter to only lines containing Chinese characters
+    const chineseLines = lines.filter((l) =>
+      /[\u4e00-\u9fff\u3400-\u4dbf]/.test(l.text)
+    );
+
+    if (chineseLines.length === 0) {
+      console.log(
+        `Parsed ${lines.length} caption lines but none contain Chinese characters`
+      );
+      return null;
+    }
+
+    console.log(
+      `Parsed ${chineseLines.length} Chinese caption lines from YouTube`
+    );
+    return chineseLines;
+  } catch (e) {
+    console.warn("YouTube captions fetch error:", e);
+    return null;
+  }
+}
+
 // ─── 4. Check if text contains Chinese characters ───────────────────────────
 function containsChinese(text: string): boolean {
   return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(text);
@@ -471,18 +623,28 @@ Deno.serve(async (req: Request) => {
       console.warn("LRCLIB fetch failed:", e);
     }
 
-    if (!syncedLyrics) {
-      return new Response(
-        JSON.stringify({
-          error: "Could not find synced lyrics for this song. Try a different song that has lyrics available on LRCLIB.",
-        }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // Step 3: Build timed lines from LRCLIB or YouTube captions fallback
+    let timedLines: { time: number; text: string }[];
 
-    // Step 3: Parse LRC into timed lines
-    const timedLines = parseLRC(syncedLyrics);
-    console.log(`Parsed ${timedLines.length} timed lyric lines`);
+    if (syncedLyrics) {
+      timedLines = parseLRC(syncedLyrics);
+      console.log(`Parsed ${timedLines.length} timed lyric lines from LRCLIB`);
+    } else {
+      // Step 2b: Try YouTube captions as fallback
+      console.log("Trying YouTube captions as fallback...");
+      const captionLines = await fetchYouTubeCaptions(videoId);
+      if (captionLines && captionLines.length > 0) {
+        timedLines = captionLines;
+        console.log(`Got ${timedLines.length} lines from YouTube captions`);
+      } else {
+        return new Response(
+          JSON.stringify({
+            error: "Could not find lyrics for this song. No results on LRCLIB and no Chinese captions available on YouTube.",
+          }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
     // Step 4: Process with OpenAI (pinyin + translations + word segmentation)
     let lyrics: LyricLine[];
