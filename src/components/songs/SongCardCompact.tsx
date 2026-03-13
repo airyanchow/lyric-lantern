@@ -11,7 +11,7 @@ export default function SongCardCompact({ title, artist, thumbnailUrl, onClick }
   return (
     <button
       onClick={onClick}
-      className="group flex w-44 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-white/5 bg-bg-card transition-all hover:border-white/10 hover:bg-bg-card/80"
+      className="group flex w-full flex-col overflow-hidden rounded-xl border border-white/5 bg-bg-card transition-all hover:border-white/10 hover:bg-bg-card/80"
     >
       {/* Thumbnail */}
       <div className="relative aspect-video w-full overflow-hidden bg-bg-secondary">

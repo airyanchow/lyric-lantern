@@ -9,7 +9,11 @@ interface UseSongReturn {
   loading: boolean;
   processingStatus: string | null;
   error: string | null;
+  lyricsNotFound: boolean;
+  lastVideoId: string | null;
+  lastVideoUrl: string | null;
   loadSong: (url: string) => Promise<void>;
+  submitLyrics: (rawLyrics: string) => Promise<void>;
 }
 
 export function useSong(): UseSongReturn {
@@ -17,6 +21,9 @@ export function useSong(): UseSongReturn {
   const [loading, setLoading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lyricsNotFound, setLyricsNotFound] = useState(false);
+  const [lastVideoId, setLastVideoId] = useState<string | null>(null);
+  const [lastVideoUrl, setLastVideoUrl] = useState<string | null>(null);
 
   const isSupabaseConfigured = () => {
     const url = import.meta.env.VITE_SUPABASE_URL;
@@ -26,17 +33,52 @@ export function useSong(): UseSongReturn {
   const incrementViewCount = (videoId: string) => {
     try {
       if (isSupabaseConfigured()) {
-        supabase.rpc('increment_view_count', { p_video_id: videoId }).then(() => {}).catch(() => {});
+        supabase.rpc('increment_view_count', { p_video_id: videoId }).then(() => {});
       }
     } catch {
       // Silently ignore
     }
   };
 
+  const callEdgeFunction = async (videoId: string, youtubeUrl: string, userLyrics?: string) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    const body: Record<string, string> = { videoId, youtubeUrl };
+    if (userLyrics) body.userLyrics = userLyrics;
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/process-song`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': supabaseAnonKey,
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    let processedData: any;
+    try {
+      processedData = await response.json();
+    } catch {
+      throw new Error('SERVICE_UNAVAILABLE');
+    }
+
+    if (!response.ok || processedData?.error) {
+      if (response.status === 404 && processedData?.error) {
+        throw new Error(processedData.error);
+      }
+      throw new Error('SERVICE_UNAVAILABLE');
+    }
+
+    return processedData;
+  };
+
   const loadSong = useCallback(async (url: string) => {
     setLoading(true);
     setError(null);
     setProcessingStatus(null);
+    setLyricsNotFound(false);
 
     const videoId = extractVideoId(url);
     if (!videoId) {
@@ -45,7 +87,9 @@ export function useSong(): UseSongReturn {
       return;
     }
 
-    // Check if this is the demo song (works without Supabase)
+    setLastVideoId(videoId);
+    setLastVideoUrl(url);
+
     if (videoId === demoSong.video_id) {
       setSong(demoSong);
       incrementViewCount(videoId);
@@ -53,7 +97,6 @@ export function useSong(): UseSongReturn {
       return;
     }
 
-    // If Supabase isn't configured, fall back to demo data for any URL
     if (!isSupabaseConfigured()) {
       setSong({
         ...demoSong,
@@ -67,7 +110,6 @@ export function useSong(): UseSongReturn {
     }
 
     try {
-      // Check cache first
       setProcessingStatus('Checking cache...');
       const { data: cachedSong } = await supabase
         .from('songs')
@@ -92,39 +134,8 @@ export function useSong(): UseSongReturn {
         return;
       }
 
-      // Cache miss — call the edge function to process
       setProcessingStatus('Processing lyrics with AI... This may take 10-15 seconds for a new song.');
-
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/process-song`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseAnonKey,
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({ videoId, youtubeUrl: url }),
-      });
-
-      let processedData: any;
-      try {
-        processedData = await response.json();
-      } catch {
-        // Response body wasn't valid JSON
-        throw new Error('SERVICE_UNAVAILABLE');
-      }
-
-      // Check for error responses (non-2xx or error field in response)
-      if (!response.ok || processedData?.error) {
-        // If the edge function returned a specific lyrics-not-found error, pass it through
-        if (response.status === 404 && processedData?.error) {
-          throw new Error(processedData.error);
-        }
-        // Everything else gets a generic user-friendly message
-        throw new Error('SERVICE_UNAVAILABLE');
-      }
+      const processedData = await callEdgeFunction(videoId, url);
 
       if (processedData) {
         setSong({
@@ -143,12 +154,10 @@ export function useSong(): UseSongReturn {
       const message = err?.message || 'An error occurred';
       console.warn('Song loading error:', message);
 
-      // Show user-friendly error messages
-      if (message === 'SERVICE_UNAVAILABLE') {
-        setError('Song cannot be translated at this time. Please check back again later.');
-      } else if (message.includes('Could not find lyrics')) {
-        setError('Song cannot be translated at this time. Please check back again later.');
-      } else if (message.includes('No Chinese lyrics')) {
+      if (message.includes('Could not find lyrics') || message.includes('No Chinese lyrics')) {
+        setLyricsNotFound(true);
+        setError('Lyrics not found for this song. You can paste the lyrics below to translate them.');
+      } else if (message === 'SERVICE_UNAVAILABLE') {
         setError('Song cannot be translated at this time. Please check back again later.');
       } else if (message.includes('Invalid YouTube URL') || message.includes('Invalid video ID')) {
         setError('Invalid YouTube URL. Please check the URL and try again.');
@@ -161,5 +170,39 @@ export function useSong(): UseSongReturn {
     setProcessingStatus(null);
   }, []);
 
-  return { song, loading, processingStatus, error, loadSong };
+  const submitLyrics = useCallback(async (rawLyrics: string) => {
+    if (!lastVideoId || !lastVideoUrl) return;
+
+    setLoading(true);
+    setError(null);
+    setLyricsNotFound(false);
+    setProcessingStatus('Translating your lyrics with AI... This may take 10-15 seconds.');
+
+    try {
+      const processedData = await callEdgeFunction(lastVideoId, lastVideoUrl, rawLyrics);
+
+      if (processedData) {
+        setSong({
+          id: processedData.id || lastVideoId,
+          video_id: processedData.video_id || lastVideoId,
+          title: processedData.title || 'Unknown Song',
+          artist: processedData.artist || 'Unknown Artist',
+          youtubeUrl: processedData.youtube_url || lastVideoUrl,
+          thumbnailUrl: processedData.thumbnail_url,
+          lyrics: processedData.lyrics || [],
+          viewCount: processedData.view_count || 1,
+        });
+        incrementViewCount(lastVideoId);
+      }
+    } catch (err: any) {
+      console.warn('Lyrics submission error:', err?.message);
+      setError('Could not process the submitted lyrics. Please try again.');
+      setLyricsNotFound(true);
+    }
+
+    setLoading(false);
+    setProcessingStatus(null);
+  }, [lastVideoId, lastVideoUrl]);
+
+  return { song, loading, processingStatus, error, lyricsNotFound, lastVideoId, lastVideoUrl, loadSong, submitLyrics };
 }

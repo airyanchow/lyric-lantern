@@ -802,7 +802,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { videoId, youtubeUrl } = await req.json();
+    const { videoId, youtubeUrl, userLyrics } = await req.json();
 
     if (!videoId || typeof videoId !== "string" || !/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
       return new Response(
@@ -894,6 +894,26 @@ Deno.serve(async (req: Request) => {
     let timedLines: { time: number; text: string }[] | null = null;
     let lyricsSource = "unknown";
 
+    // If user submitted lyrics, skip all search sources and process directly
+    if (userLyrics && typeof userLyrics === "string" && userLyrics.trim().length > 0) {
+      console.log("Processing user-submitted lyrics...");
+      const userLines = userLyrics
+        .split("\n")
+        .map((l: string) => l.trim())
+        .filter((l: string) => l.length > 0 && containsChinese(l));
+
+      if (userLines.length < 1) {
+        return new Response(
+          JSON.stringify({ error: "Submitted lyrics don't contain Chinese characters." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      timedLines = userLines.map((text: string, i: number) => ({ time: i * 4, text }));
+      lyricsSource = "User Submitted";
+      console.log(`User submitted ${timedLines.length} Chinese lines`);
+    }
+
     // Source 1: LRCLIB
     try {
       const syncedLyrics = await fetchLRCLyrics(title, artist);
@@ -954,9 +974,11 @@ Deno.serve(async (req: Request) => {
 
     // If all sources failed, return 404
     if (!timedLines || timedLines.length === 0) {
+      const songNames = extractSongName(title, artist);
       return new Response(
         JSON.stringify({
           error: "Could not find lyrics for this song from any source.",
+          debug: { title, artist, songNames },
         }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );

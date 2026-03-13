@@ -5,11 +5,10 @@ import VideoPlayer from '../components/player/VideoPlayer';
 import LyricsPanel from '../components/lyrics/LyricsPanel';
 import SongCardCompact from '../components/songs/SongCardCompact';
 import { usePlayer } from '../hooks/usePlayer';
-import { useSynchronizedLyrics } from '../hooks/useSynchronizedLyrics';
 import { useSong } from '../hooks/useSong';
 import { useVocabulary } from '../hooks/useVocabulary';
 import { supabase } from '../lib/supabase';
-import { Music, BookOpen, Zap } from 'lucide-react';
+import { Music, BookOpen, Zap, Send } from 'lucide-react';
 import ChineseLantern from '../components/icons/ChineseLantern';
 import type { LyricWord } from '../types';
 
@@ -22,12 +21,13 @@ interface PopularSong {
 }
 
 export default function HomePage() {
-  const { song, loading: songLoading, processingStatus, error: songError, loadSong } = useSong();
+  const { song, loading: songLoading, processingStatus, error: songError, lyricsNotFound, loadSong, submitLyrics } = useSong();
   const { saveWord } = useVocabulary();
   const player = usePlayer();
   const location = useLocation();
   const navigate = useNavigate();
   const [popularSongs, setPopularSongs] = useState<PopularSong[]>([]);
+  const [userLyricsText, setUserLyricsText] = useState('');
 
   // Fetch top 20 popular songs for the landing page
   useEffect(() => {
@@ -36,8 +36,7 @@ export default function HomePage() {
       .select('id, title, artist, thumbnail_url, youtube_url')
       .order('view_count', { ascending: false })
       .limit(20)
-      .then(({ data }) => { if (data) setPopularSongs(data); })
-      .catch(() => {});
+      .then(({ data }) => { if (data) setPopularSongs(data); });
   }, []);
 
   // Auto-load song when navigating from Browse page
@@ -45,24 +44,11 @@ export default function HomePage() {
   useEffect(() => {
     if (songUrlFromState) {
       loadSong(songUrlFromState);
-      // Clear the state so back/forward doesn't re-trigger
       navigate('/', { replace: true, state: {} });
     }
   }, [songUrlFromState, loadSong, navigate]);
 
-  const { currentLineIndex } = useSynchronizedLyrics(
-    song?.lyrics || [],
-    player.playedSeconds
-  );
   const [toast, setToast] = useState<string | null>(null);
-
-  const handleLineClick = useCallback(
-    (startTime: number) => {
-      player.seekTo(startTime);
-      if (!player.playing) player.setPlaying(true);
-    },
-    [player]
-  );
 
   const handleSaveWord = useCallback(
     async (word: LyricWord, songTitle?: string) => {
@@ -77,6 +63,12 @@ export default function HomePage() {
     },
     [saveWord]
   );
+
+  const handleSubmitLyrics = useCallback(async () => {
+    if (!userLyricsText.trim()) return;
+    await submitLyrics(userLyricsText);
+    setUserLyricsText('');
+  }, [userLyricsText, submitLyrics]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
@@ -95,6 +87,31 @@ export default function HomePage() {
           </div>
         )}
       </div>
+
+      {/* Lyrics Submission Form - shown when lyrics not found */}
+      {lyricsNotFound && !songLoading && (
+        <div className="mb-6 rounded-xl border border-white/10 bg-bg-card p-5">
+          <h3 className="mb-2 text-sm font-semibold text-text-primary">Submit Lyrics</h3>
+          <p className="mb-3 text-xs text-text-secondary">
+            Paste the Chinese lyrics below and we'll add pinyin and English translations.
+          </p>
+          <textarea
+            value={userLyricsText}
+            onChange={(e) => setUserLyricsText(e.target.value)}
+            placeholder="Paste Chinese lyrics here, one line per line..."
+            className="w-full rounded-lg border border-white/10 bg-bg-primary p-3 font-chinese text-sm text-text-primary placeholder:text-text-secondary/50 focus:border-china-red focus:outline-none"
+            rows={8}
+          />
+          <button
+            onClick={handleSubmitLyrics}
+            disabled={!userLyricsText.trim() || songLoading}
+            className="mt-3 flex items-center gap-2 rounded-lg bg-china-red px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-china-red/80 disabled:opacity-50"
+          >
+            <Send className="h-4 w-4" />
+            Translate & Show
+          </button>
+        </div>
+      )}
 
       {/* Main Content */}
       {song ? (
@@ -132,8 +149,6 @@ export default function HomePage() {
           <div className="h-[calc(100vh-12rem)] lg:sticky lg:top-20">
             <LyricsPanel
               lyrics={song.lyrics}
-              currentLineIndex={currentLineIndex}
-              onLineClick={handleLineClick}
               songTitle={song.title}
               onSaveWord={handleSaveWord}
             />
@@ -141,51 +156,53 @@ export default function HomePage() {
         </div>
       ) : (
         /* Landing Hero when no song is loaded */
-        <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
-          <ChineseLantern className="h-16 w-16 opacity-60" />
-          <h1 className="mt-6 text-3xl font-bold md:text-4xl">
-            Learn Chinese Through <span className="text-china-red">Music</span>
-          </h1>
-          <p className="mt-3 max-w-lg text-text-secondary">
-            Paste any YouTube URL of a Chinese song above. We'll show you synchronized lyrics
-            with pinyin and English translations so you can learn as you listen.
-          </p>
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/5 bg-bg-card p-4 text-center">
-              <Music className="mx-auto h-8 w-8 text-china-red/60" />
-              <p className="mt-2 text-sm font-medium">Karaoke Lyrics</p>
-              <p className="mt-1 text-xs text-text-secondary">Synchronized Chinese, Pinyin, English</p>
-            </div>
-            <div className="rounded-xl border border-white/5 bg-bg-card p-4 text-center">
-              <BookOpen className="mx-auto h-8 w-8 text-china-red/60" />
-              <p className="mt-2 text-sm font-medium">Save Vocabulary</p>
-              <p className="mt-1 text-xs text-text-secondary">Click any word to learn and save it</p>
-            </div>
-            <div className="rounded-xl border border-white/5 bg-bg-card p-4 text-center">
-              <Zap className="mx-auto h-8 w-8 text-china-red/60" />
-              <p className="mt-2 text-sm font-medium">Learn Anywhere</p>
-              <p className="mt-1 text-xs text-text-secondary">Works on any device, any time</p>
-            </div>
-          </div>
-
-          {/* Popular Songs */}
-          {popularSongs.length > 0 && (
-            <div className="mt-12 w-full max-w-5xl">
-              <h2 className="mb-4 text-lg font-semibold">Popular Songs</h2>
-              <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-thin">
-                {popularSongs.map((s) => (
-                  <SongCardCompact
-                    key={s.id}
-                    title={s.title}
-                    artist={s.artist}
-                    thumbnailUrl={s.thumbnail_url}
-                    onClick={() => loadSong(s.youtube_url)}
-                  />
-                ))}
+        !lyricsNotFound && (
+          <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+            <ChineseLantern className="h-16 w-16 opacity-60" />
+            <h1 className="mt-6 text-3xl font-bold md:text-4xl">
+              Learn Chinese Through <span className="text-china-red">Music</span>
+            </h1>
+            <p className="mt-3 max-w-lg text-text-secondary">
+              Paste any YouTube URL of a Chinese song above. We'll show you lyrics
+              with pinyin and English translations so you can learn as you listen.
+            </p>
+            <div className="mt-8 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/5 bg-bg-card p-4 text-center">
+                <Music className="mx-auto h-8 w-8 text-china-red/60" />
+                <p className="mt-2 text-sm font-medium">Lyrics</p>
+                <p className="mt-1 text-xs text-text-secondary">Chinese, Pinyin, English</p>
+              </div>
+              <div className="rounded-xl border border-white/5 bg-bg-card p-4 text-center">
+                <BookOpen className="mx-auto h-8 w-8 text-china-red/60" />
+                <p className="mt-2 text-sm font-medium">Save Vocabulary</p>
+                <p className="mt-1 text-xs text-text-secondary">Click any word to learn and save it</p>
+              </div>
+              <div className="rounded-xl border border-white/5 bg-bg-card p-4 text-center">
+                <Zap className="mx-auto h-8 w-8 text-china-red/60" />
+                <p className="mt-2 text-sm font-medium">Learn Anywhere</p>
+                <p className="mt-1 text-xs text-text-secondary">Works on any device, any time</p>
               </div>
             </div>
-          )}
-        </div>
+
+            {/* Popular Songs - Grid Layout */}
+            {popularSongs.length > 0 && (
+              <div className="mt-12 w-full max-w-5xl">
+                <h2 className="mb-4 text-lg font-semibold">Popular Songs</h2>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                  {popularSongs.map((s) => (
+                    <SongCardCompact
+                      key={s.id}
+                      title={s.title}
+                      artist={s.artist}
+                      thumbnailUrl={s.thumbnail_url}
+                      onClick={() => loadSong(s.youtube_url)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
       )}
 
       {/* Toast notification */}
