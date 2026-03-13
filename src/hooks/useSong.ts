@@ -65,7 +65,7 @@ export function useSong(): UseSongReturn {
     }
 
     if (!response.ok || processedData?.error) {
-      if (response.status === 404 && processedData?.error) {
+      if ((response.status === 404 || response.status === 422) && processedData?.error) {
         throw new Error(processedData.error);
       }
       throw new Error('SERVICE_UNAVAILABLE');
@@ -154,7 +154,7 @@ export function useSong(): UseSongReturn {
       const message = err?.message || 'An error occurred';
       console.warn('Song loading error:', message);
 
-      if (message.includes('Could not find lyrics') || message.includes('No Chinese lyrics')) {
+      if (message.includes('Could not find lyrics') || message.includes('No Chinese lyrics') || message.includes('could not be processed')) {
         setLyricsNotFound(true);
         setError('Lyrics not found for this song. You can paste the lyrics below to translate them.');
       } else if (message === 'SERVICE_UNAVAILABLE') {
