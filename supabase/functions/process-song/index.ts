@@ -802,7 +802,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { videoId, youtubeUrl, userLyrics } = await req.json();
+    const { videoId, youtubeUrl, userLyrics, userLyricsMode } = await req.json();
 
     if (!videoId || typeof videoId !== "string" || !/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
       return new Response(
@@ -827,25 +827,30 @@ Deno.serve(async (req: Request) => {
     // Create Supabase admin client (bypasses RLS)
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Check if already cached
-    const { data: existing } = await supabase
-      .from("songs")
-      .select("*")
-      .eq("video_id", videoId)
-      .single();
+    // Check if already cached (skip cache when user submits their own lyrics)
+    if (!userLyrics) {
+      const { data: existing } = await supabase
+        .from("songs")
+        .select("*")
+        .eq("video_id", videoId)
+        .single();
 
-    if (existing) {
-      const hasLyrics = Array.isArray(existing.lyrics) && existing.lyrics.length > 0;
+      if (existing) {
+        const hasLyrics = Array.isArray(existing.lyrics) && existing.lyrics.length > 0;
 
-      if (hasLyrics) {
-        // Serve cached version
-        return new Response(JSON.stringify(existing), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        if (hasLyrics) {
+          // Serve cached version
+          return new Response(JSON.stringify(existing), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // Bad entry (empty lyrics) — always delete so we can retry with improved sources
+        console.log("Found cached entry with empty/missing lyrics, deleting to retry...");
+        await supabase.from("songs").delete().eq("video_id", videoId);
       }
-
-      // Bad entry (empty lyrics) — always delete so we can retry with improved sources
-      console.log("Found cached entry with empty/missing lyrics, deleting to retry...");
+    } else {
+      // When user submits lyrics, delete any existing entry so the new version can be saved
       await supabase.from("songs").delete().eq("video_id", videoId);
     }
 
@@ -893,87 +898,136 @@ Deno.serve(async (req: Request) => {
     // Step 2: Multi-source lyrics search (LRCLIB → NetEase → YouTube Captions → AI)
     let timedLines: { time: number; text: string }[] | null = null;
     let lyricsSource = "unknown";
+    let pretranslatedLyrics: LyricLine[] | null = null;
 
     // If user submitted lyrics, skip all search sources and process directly
     if (userLyrics && typeof userLyrics === "string" && userLyrics.trim().length > 0) {
-      console.log("Processing user-submitted lyrics...");
-      const userLines = userLyrics
-        .split("\n")
-        .map((l: string) => l.trim())
-        .filter((l: string) => l.length > 0 && containsChinese(l));
 
-      if (userLines.length < 1) {
-        return new Response(
-          JSON.stringify({ error: "Submitted lyrics don't contain Chinese characters." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+      if (userLyricsMode === "pretranslated") {
+        // Pre-translated mode: "Chinese | Pinyin | English" per line
+        console.log("Processing pre-translated user lyrics...");
+        const parsedLines = userLyrics
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => l.length > 0)
+          .map((l: string) => {
+            const parts = l.split("|").map((p: string) => p.trim());
+            return {
+              chinese: parts[0] || "",
+              pinyin: parts[1] || "",
+              english: parts[2] || "",
+            };
+          })
+          .filter((l: { chinese: string }) => l.chinese.length > 0);
 
-      timedLines = userLines.map((text: string, i: number) => ({ time: i * 4, text }));
-      lyricsSource = "User Submitted";
-      console.log(`User submitted ${timedLines.length} Chinese lines`);
-    }
+        if (parsedLines.length < 1) {
+          return new Response(
+            JSON.stringify({ error: "No valid lyrics lines found. Use format: Chinese | Pinyin | English" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
 
-    // Source 1: LRCLIB
-    try {
-      const syncedLyrics = await fetchLRCLyrics(title, artist);
-      if (syncedLyrics) {
-        timedLines = parseLRC(syncedLyrics);
-        lyricsSource = "LRCLIB";
-        console.log(`Found ${timedLines.length} timed lines from LRCLIB`);
+        // Build final lyrics directly — no OpenAI needed
+        pretranslatedLyrics = parsedLines.map((line, i: number) => ({
+          id: i + 1,
+          startTime: i * 4,
+          endTime: (i + 1) * 4,
+          chinese: line.chinese,
+          pinyin: line.pinyin,
+          english: line.english,
+          words: line.chinese.split("").filter((c: string) => c.trim()).map((char: string) => ({
+            chinese: char,
+            pinyin: "",
+            english: "",
+          })),
+        }));
+        lyricsSource = "User Pre-translated";
+        console.log(`User submitted ${pretranslatedLyrics.length} pre-translated lines`);
+
       } else {
-        console.log("No synced lyrics found on LRCLIB");
-      }
-    } catch (e) {
-      console.warn("LRCLIB fetch failed:", e);
-    }
+        // Chinese-only mode: filter for Chinese lines, send through OpenAI
+        console.log("Processing user-submitted Chinese lyrics...");
+        const userLines = userLyrics
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => l.length > 0 && containsChinese(l));
 
-    // Source 2: NetEase Cloud Music
-    if (!timedLines || timedLines.length === 0) {
+        if (userLines.length < 1) {
+          return new Response(
+            JSON.stringify({ error: "Submitted lyrics don't contain Chinese characters." }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        timedLines = userLines.map((text: string, i: number) => ({ time: i * 4, text }));
+        lyricsSource = "User Submitted";
+        console.log(`User submitted ${timedLines.length} Chinese lines`);
+      }
+
+    } else {
+      // No user lyrics — search all automated sources
+
+      // Source 1: LRCLIB
       try {
-        const neteaseLyrics = await fetchNetEaseLyrics(title, artist);
-        if (neteaseLyrics) {
-          timedLines = parseLRC(neteaseLyrics);
-          lyricsSource = "NetEase";
-          console.log(`Found ${timedLines.length} timed lines from NetEase`);
+        const syncedLyrics = await fetchLRCLyrics(title, artist);
+        if (syncedLyrics) {
+          timedLines = parseLRC(syncedLyrics);
+          lyricsSource = "LRCLIB";
+          console.log(`Found ${timedLines.length} timed lines from LRCLIB`);
+        } else {
+          console.log("No synced lyrics found on LRCLIB");
         }
       } catch (e) {
-        console.warn("NetEase fetch failed:", e);
+        console.warn("LRCLIB fetch failed:", e);
       }
-    }
 
-    // Source 3: YouTube Captions
-    if (!timedLines || timedLines.length === 0) {
-      console.log("Trying YouTube captions as fallback...");
-      try {
-        const captionLines = await fetchYouTubeCaptions(videoId);
-        if (captionLines && captionLines.length > 0) {
-          timedLines = captionLines;
-          lyricsSource = "YouTube Captions";
-          console.log(`Found ${timedLines.length} lines from YouTube captions`);
+      // Source 2: NetEase Cloud Music
+      if (!timedLines || timedLines.length === 0) {
+        try {
+          const neteaseLyrics = await fetchNetEaseLyrics(title, artist);
+          if (neteaseLyrics) {
+            timedLines = parseLRC(neteaseLyrics);
+            lyricsSource = "NetEase";
+            console.log(`Found ${timedLines.length} timed lines from NetEase`);
+          }
+        } catch (e) {
+          console.warn("NetEase fetch failed:", e);
         }
-      } catch (e) {
-        console.warn("YouTube captions fetch failed:", e);
       }
-    }
 
-    // Source 4: AI web search (last resort — uses OpenAI to find lyrics by title/artist)
-    if (!timedLines || timedLines.length === 0) {
-      console.log("Trying AI lyrics search as last resort...");
-      try {
-        const aiLines = await fetchLyricsViaAI(title, artist, openaiKey);
-        if (aiLines && aiLines.length > 0) {
-          timedLines = aiLines;
-          lyricsSource = "AI Search";
-          console.log(`Found ${timedLines.length} lines via AI search`);
+      // Source 3: YouTube Captions
+      if (!timedLines || timedLines.length === 0) {
+        console.log("Trying YouTube captions as fallback...");
+        try {
+          const captionLines = await fetchYouTubeCaptions(videoId);
+          if (captionLines && captionLines.length > 0) {
+            timedLines = captionLines;
+            lyricsSource = "YouTube Captions";
+            console.log(`Found ${timedLines.length} lines from YouTube captions`);
+          }
+        } catch (e) {
+          console.warn("YouTube captions fetch failed:", e);
         }
-      } catch (e) {
-        console.warn("AI lyrics search failed:", e);
+      }
+
+      // Source 4: AI web search (last resort — uses OpenAI to find lyrics by title/artist)
+      if (!timedLines || timedLines.length === 0) {
+        console.log("Trying AI lyrics search as last resort...");
+        try {
+          const aiLines = await fetchLyricsViaAI(title, artist, openaiKey);
+          if (aiLines && aiLines.length > 0) {
+            timedLines = aiLines;
+            lyricsSource = "AI Search";
+            console.log(`Found ${timedLines.length} lines via AI search`);
+          }
+        } catch (e) {
+          console.warn("AI lyrics search failed:", e);
+        }
       }
     }
 
-    // If all sources failed, return 404
-    if (!timedLines || timedLines.length === 0) {
+    // If all sources failed (and no pretranslated), return 404
+    if (!pretranslatedLyrics && (!timedLines || timedLines.length === 0)) {
       const songNames = extractSongName(title, artist);
       return new Response(
         JSON.stringify({
@@ -984,16 +1038,21 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    console.log(`Using lyrics from: ${lyricsSource} (${timedLines.length} lines)`);
-
-    // Step 4: Process with OpenAI (pinyin + translations + word segmentation)
+    // Step 4: Process with OpenAI (skip if pre-translated lyrics already built)
     let lyrics: LyricLine[];
-    try {
-      lyrics = await processWithOpenAI(timedLines, openaiKey);
-      console.log(`AI processed ${lyrics.length} lyric lines`);
-    } catch (e) {
-      console.warn("OpenAI processing failed, using basic lyrics:", e);
-      lyrics = createBasicLyrics(timedLines);
+
+    if (pretranslatedLyrics) {
+      lyrics = pretranslatedLyrics;
+      console.log(`Using ${lyrics.length} pre-translated lyric lines (skipping OpenAI)`);
+    } else {
+      console.log(`Using lyrics from: ${lyricsSource} (${timedLines!.length} lines)`);
+      try {
+        lyrics = await processWithOpenAI(timedLines!, openaiKey);
+        console.log(`AI processed ${lyrics.length} lyric lines`);
+      } catch (e) {
+        console.warn("OpenAI processing failed, using basic lyrics:", e);
+        lyrics = createBasicLyrics(timedLines!);
+      }
     }
 
     // Don't cache songs with empty lyrics — something went wrong

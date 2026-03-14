@@ -13,7 +13,7 @@ interface UseSongReturn {
   lastVideoId: string | null;
   lastVideoUrl: string | null;
   loadSong: (url: string) => Promise<void>;
-  submitLyrics: (rawLyrics: string) => Promise<void>;
+  submitLyrics: (rawLyrics: string, mode?: 'chinese' | 'pretranslated') => Promise<void>;
 }
 
 export function useSong(): UseSongReturn {
@@ -40,12 +40,13 @@ export function useSong(): UseSongReturn {
     }
   };
 
-  const callEdgeFunction = async (videoId: string, youtubeUrl: string, userLyrics?: string) => {
+  const callEdgeFunction = async (videoId: string, youtubeUrl: string, userLyrics?: string, userLyricsMode?: string) => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
     const body: Record<string, string> = { videoId, youtubeUrl };
     if (userLyrics) body.userLyrics = userLyrics;
+    if (userLyricsMode) body.userLyricsMode = userLyricsMode;
 
     const response = await fetch(`${supabaseUrl}/functions/v1/process-song`, {
       method: 'POST',
@@ -170,16 +171,20 @@ export function useSong(): UseSongReturn {
     setProcessingStatus(null);
   }, []);
 
-  const submitLyrics = useCallback(async (rawLyrics: string) => {
+  const submitLyrics = useCallback(async (rawLyrics: string, mode: 'chinese' | 'pretranslated' = 'chinese') => {
     if (!lastVideoId || !lastVideoUrl) return;
 
     setLoading(true);
     setError(null);
     setLyricsNotFound(false);
-    setProcessingStatus('Translating your lyrics with AI... This may take 10-15 seconds.');
+    setProcessingStatus(
+      mode === 'pretranslated'
+        ? 'Processing your pre-translated lyrics...'
+        : 'Translating your lyrics with AI... This may take 10-15 seconds.'
+    );
 
     try {
-      const processedData = await callEdgeFunction(lastVideoId, lastVideoUrl, rawLyrics);
+      const processedData = await callEdgeFunction(lastVideoId, lastVideoUrl, rawLyrics, mode);
 
       if (processedData) {
         setSong({

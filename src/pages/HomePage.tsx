@@ -28,6 +28,7 @@ export default function HomePage() {
   const navigate = useNavigate();
   const [popularSongs, setPopularSongs] = useState<PopularSong[]>([]);
   const [userLyricsText, setUserLyricsText] = useState('');
+  const [lyricsMode, setLyricsMode] = useState<'chinese' | 'pretranslated'>('chinese');
 
   // Fetch top 20 popular songs for the landing page
   useEffect(() => {
@@ -66,9 +67,9 @@ export default function HomePage() {
 
   const handleSubmitLyrics = useCallback(async () => {
     if (!userLyricsText.trim()) return;
-    await submitLyrics(userLyricsText);
+    await submitLyrics(userLyricsText, lyricsMode);
     setUserLyricsText('');
-  }, [userLyricsText, submitLyrics]);
+  }, [userLyricsText, lyricsMode, submitLyrics]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
@@ -92,13 +93,44 @@ export default function HomePage() {
       {lyricsNotFound && !songLoading && (
         <div className="mb-6 rounded-xl border border-white/10 bg-bg-card p-5">
           <h3 className="mb-2 text-sm font-semibold text-text-primary">Submit Lyrics</h3>
+
+          {/* Mode tabs */}
+          <div className="mb-3 flex gap-1 rounded-lg bg-bg-primary p-1">
+            <button
+              onClick={() => setLyricsMode('chinese')}
+              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                lyricsMode === 'chinese'
+                  ? 'bg-china-red text-white'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              Chinese Only
+            </button>
+            <button
+              onClick={() => setLyricsMode('pretranslated')}
+              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                lyricsMode === 'pretranslated'
+                  ? 'bg-china-red text-white'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              Pre-translated
+            </button>
+          </div>
+
           <p className="mb-3 text-xs text-text-secondary">
-            Paste the Chinese lyrics below and we'll add pinyin and English translations.
+            {lyricsMode === 'chinese'
+              ? "Paste the Chinese lyrics below and we'll add pinyin and English translations."
+              : "Paste lyrics with translations. Format each line as: Chinese | Pinyin | English"}
           </p>
           <textarea
             value={userLyricsText}
             onChange={(e) => setUserLyricsText(e.target.value)}
-            placeholder="Paste Chinese lyrics here, one line per line..."
+            placeholder={
+              lyricsMode === 'chinese'
+                ? "Paste Chinese lyrics here, one line per line..."
+                : "我爱你 | wǒ ài nǐ | I love you\n你好吗 | nǐ hǎo ma | How are you"
+            }
             className="w-full rounded-lg border border-white/10 bg-bg-primary p-3 font-chinese text-sm text-text-primary placeholder:text-text-secondary/50 focus:border-china-red focus:outline-none"
             rows={8}
           />
@@ -108,7 +140,7 @@ export default function HomePage() {
             className="mt-3 flex items-center gap-2 rounded-lg bg-china-red px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-china-red/80 disabled:opacity-50"
           >
             <Send className="h-4 w-4" />
-            Translate & Show
+            {lyricsMode === 'chinese' ? 'Translate & Show' : 'Show Lyrics'}
           </button>
         </div>
       )}
