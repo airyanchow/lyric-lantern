@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "seed:charts": "node --env-file-if-exists=.env scripts/find-top-mandarin-songs.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",

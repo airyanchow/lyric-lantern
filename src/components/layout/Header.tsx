@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { BookOpen, TrendingUp, LogIn, LogOut, User } from 'lucide-react';
+import { Award, BookOpen, TrendingUp, LogIn, LogOut, User } from 'lucide-react';
 import ChineseLantern from '../icons/ChineseLantern';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -23,6 +23,13 @@ export default function Header() {
           >
             <ChineseLantern className="h-4 w-4" />
             <span className="hidden sm:inline">Learn</span>
+          </Link>
+          <Link
+            to="/top20"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-white/5 hover:text-text-primary no-underline"
+          >
+            <Award className="h-4 w-4" />
+            <span className="hidden sm:inline">Top 20</span>
           </Link>
           <Link
             to="/browse"

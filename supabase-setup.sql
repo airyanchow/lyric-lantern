@@ -170,5 +170,37 @@ CREATE POLICY "Users can delete own vocabulary"
   USING ((select auth.uid()) = user_id);
 
 -- ============================================================
+-- mandarin_charts: Top 20 Mandarin Songs by Year (2006-2025)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS mandarin_charts (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  video_id      VARCHAR(11) NOT NULL UNIQUE,
+  youtube_url   TEXT NOT NULL,
+  title         TEXT,
+  artist        TEXT,
+  thumbnail_url TEXT,
+  year          INTEGER NOT NULL CHECK (year BETWEEN 2006 AND 2025),
+  rank          INTEGER NOT NULL CHECK (rank BETWEEN 1 AND 20),
+  view_count    BIGINT,
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(year, rank)
+);
+
+ALTER TABLE mandarin_charts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "mandarin_charts_public_read"
+  ON mandarin_charts FOR SELECT USING (true);
+
+CREATE POLICY "mandarin_charts_insert"
+  ON mandarin_charts FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "mandarin_charts_update"
+  ON mandarin_charts FOR UPDATE USING (true) WITH CHECK (true);
+
+CREATE INDEX IF NOT EXISTS mandarin_charts_year_rank_idx
+  ON mandarin_charts (year ASC, rank ASC);
+
+-- ============================================================
 -- DONE! All tables, policies, and functions are set up.
 -- ============================================================
