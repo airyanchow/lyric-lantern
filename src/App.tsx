@@ -4,6 +4,7 @@ import Layout from './components/layout/Layout';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import BrowsePage from './pages/BrowsePage';
+import Top20Page from './pages/Top20Page';
 import VocabularyPage from './pages/VocabularyPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
@@ -21,6 +22,10 @@ const router = createBrowserRouter([
       {
         path: 'browse',
         element: <BrowsePage />,
+      },
+      {
+        path: 'top20',
+        element: <Top20Page />,
       },
       {
         path: 'login',
