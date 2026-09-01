@@ -24,17 +24,11 @@ CREATE POLICY "mandarin_charts_public_read"
   FOR SELECT
   USING (true);
 
--- Allow the seeding script (using anon key) to insert/update chart data
-CREATE POLICY "mandarin_charts_insert"
-  ON mandarin_charts
-  FOR INSERT
-  WITH CHECK (true);
-
-CREATE POLICY "mandarin_charts_update"
-  ON mandarin_charts
-  FOR UPDATE
-  USING (true)
-  WITH CHECK (true);
+-- NOTE: there are deliberately NO public INSERT/UPDATE policies.
+-- The publishable (anon) key ships in the client bundle, so a permissive write
+-- policy would let anyone overwrite the chart. The seeding script authenticates
+-- with the SECRET key, which bypasses RLS entirely, so ingestion still works
+-- while the table stays read-only to the public.
 
 -- Index for fast year-based lookups
 CREATE INDEX IF NOT EXISTS mandarin_charts_year_rank_idx

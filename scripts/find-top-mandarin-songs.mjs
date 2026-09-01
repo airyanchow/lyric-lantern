@@ -11,8 +11,12 @@
  *   - Supply credentials EITHER via a .env file in the repo root OR as real
  *     environment variables. Both work:
  *       VITE_SUPABASE_URL=https://your-project.supabase.co
- *       VITE_SUPABASE_ANON_KEY=your-anon-key
+ *       SUPABASE_SECRET_KEY=your-supabase-secret-key
  *       YOUTUBE_API_KEY=your-youtube-data-api-v3-key
+ *
+ *     SUPABASE_SECRET_KEY is the secret / service_role key. It bypasses RLS so
+ *     that mandarin_charts needs no public write policy. Keep it out of any
+ *     frontend bundle and out of version control (.env is gitignored).
  *
  * Usage:
  *   npm run seed:charts
@@ -26,7 +30,12 @@ import { createClient } from '@supabase/supabase-js';
 // --- Config ---------------------------------------------------------------
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
+// Writes use the SECRET key, never the publishable/anon key. The secret key
+// bypasses RLS, so mandarin_charts can stay public-read / no-public-write.
+// This script runs locally or in CI only - the secret key must never be
+// exposed to a browser bundle.
+const SUPABASE_SECRET_KEY =
+  process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 const START_YEAR = 2006;
@@ -165,8 +174,16 @@ async function main() {
     console.error('ERROR: VITE_SUPABASE_URL is not set. Add it to your .env file.');
     process.exit(1);
   }
-  if (!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.includes('your-anon-key')) {
-    console.error('ERROR: VITE_SUPABASE_ANON_KEY is not set. Add it to your .env file.');
+  if (!SUPABASE_SECRET_KEY) {
+    console.error('ERROR: SUPABASE_SECRET_KEY is not set. Add it to your .env file.');
+    console.error('  Supabase dashboard -> Project Settings -> API Keys -> secret key');
+    console.error('  (labelled "service_role" on older dashboards).');
+    process.exit(1);
+  }
+  if (SUPABASE_SECRET_KEY.startsWith('sb_publishable_')) {
+    console.error('ERROR: SUPABASE_SECRET_KEY holds a PUBLISHABLE key.');
+    console.error('  That key cannot write to mandarin_charts (public read only).');
+    console.error('  Use the SECRET key instead - never put it in frontend code.');
     process.exit(1);
   }
   if (!YOUTUBE_API_KEY) {
@@ -174,7 +191,9 @@ async function main() {
     process.exit(1);
   }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 
   console.log('Lyric Lantern - Top 20 Mandarin Songs by Year');
   console.log(`Covering years ${START_YEAR}-${END_YEAR}`);

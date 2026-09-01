@@ -192,11 +192,9 @@ ALTER TABLE mandarin_charts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "mandarin_charts_public_read"
   ON mandarin_charts FOR SELECT USING (true);
 
-CREATE POLICY "mandarin_charts_insert"
-  ON mandarin_charts FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "mandarin_charts_update"
-  ON mandarin_charts FOR UPDATE USING (true) WITH CHECK (true);
+-- No public INSERT/UPDATE policies by design: the seeding script uses the
+-- SECRET key (bypasses RLS). A permissive write policy would let anyone with
+-- the publishable key overwrite the chart.
 
 CREATE INDEX IF NOT EXISTS mandarin_charts_year_rank_idx
   ON mandarin_charts (year ASC, rank ASC);
