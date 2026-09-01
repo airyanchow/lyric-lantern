@@ -180,6 +180,25 @@ async function main() {
   console.log(`Covering years ${START_YEAR}-${END_YEAR}`);
   console.log('-'.repeat(60));
 
+  // Preflight: confirm the mandarin_charts table is reachable BEFORE spending any
+  // YouTube quota. A full run costs ~8,040 of the default 10,000 units/day, so a
+  // missing table discovered late would waste the entire day's retry budget.
+  const { error: preflightError } = await supabase
+    .from('mandarin_charts')
+    .select('video_id')
+    .limit(1);
+
+  if (preflightError) {
+    console.error('\nERROR: cannot read the mandarin_charts table.');
+    console.error(`  ${preflightError.message}`);
+    console.error('\nFix: open your Supabase dashboard -> SQL Editor -> New query,');
+    console.error('paste the contents of supabase/migrations/add-mandarin-charts.sql,');
+    console.error('and click Run. Then re-run this script.');
+    console.error('\nStopping now so that no YouTube quota is consumed.');
+    process.exit(1);
+  }
+  console.log('Preflight OK: mandarin_charts is reachable.\n');
+
   // Global dedup sets - a song belongs to its EARLIEST charting year
   const seenVideoIds = new Set();
   const seenSongKeys = new Set();
