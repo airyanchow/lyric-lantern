@@ -58,8 +58,8 @@ export default function Header() {
           <Link to="/browse" className={NAV_LINK}>
             <TrendingUp className="h-4 w-4" /> Browse Songs
           </Link>
-          <Link to="/top20" className={NAV_LINK}>
-            <Award className="h-4 w-4" /> Top 20
+          <Link to="/charts" className={NAV_LINK}>
+            <Award className="h-4 w-4" /> Charts
           </Link>
           {user && (
             <>
@@ -135,8 +135,8 @@ export default function Header() {
             <Link to="/browse" className={MOBILE_NAV_LINK}>
               <TrendingUp className="h-4 w-4" /> Browse Songs
             </Link>
-            <Link to="/top20" className={MOBILE_NAV_LINK}>
-              <Award className="h-4 w-4" /> Top 20
+            <Link to="/charts" className={MOBILE_NAV_LINK}>
+              <Award className="h-4 w-4" /> Charts
             </Link>
             {user && (
               <>

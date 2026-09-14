@@ -225,14 +225,14 @@ export default function HomePage() {
 
             {/* Top 20 Mandarin chart entry point */}
             <Link
-              to="/top20"
+              to="/charts"
               className="group mt-8 flex w-full max-w-2xl items-center gap-4 rounded-xl border border-china-red/30 bg-china-red/10 p-4 no-underline transition-colors hover:border-china-red/50 hover:bg-china-red/15"
             >
               <Award className="h-8 w-8 flex-shrink-0 text-china-red" />
               <div className="min-w-0 flex-1 text-left">
-                <p className="font-semibold text-text-primary">Top 20 Mandarin Songs by Year</p>
+                <p className="font-semibold text-text-primary">Top Mandarin Songs by Year</p>
                 <p className="mt-0.5 text-sm text-text-secondary">
-                  The most-viewed Mandarin hits of every year, 2006-2025
+                  Browse the most-viewed Mandarin hits, year by year
                 </p>
               </div>
               <ChevronRight className="h-5 w-5 flex-shrink-0 text-text-secondary transition-transform group-hover:translate-x-0.5" />

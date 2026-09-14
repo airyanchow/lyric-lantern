@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import Layout from './components/layout/Layout';
@@ -15,7 +15,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const PlaylistsPage = lazy(() => import('./pages/PlaylistsPage'));
 const PlaylistDetailPage = lazy(() => import('./pages/PlaylistDetailPage'));
 const SentenceBuilderPage = lazy(() => import('./pages/SentenceBuilderPage'));
-const Top20Page = lazy(() => import('./pages/Top20Page'));
+const ChartsPage = lazy(() => import('./pages/ChartsPage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const TermsPage = lazy(() => import('./pages/TermsPage'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
@@ -39,7 +39,9 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <HomePage /> },
       { path: 'browse', element: <LazyPage><BrowsePage /></LazyPage> },
-      { path: 'top20', element: <LazyPage><Top20Page /></LazyPage> },
+      { path: 'charts', element: <LazyPage><ChartsPage /></LazyPage> },
+      // Legacy link target: the chart moved to /charts with a year selector.
+      { path: 'top20', element: <Navigate to="/charts" replace /> },
       { path: 'login', element: <LoginPage /> },
       {
         path: 'vocabulary',
