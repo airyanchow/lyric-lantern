@@ -39,6 +39,10 @@ export interface SavedWord {
   english: string;
   song_title: string | null;
   created_at: string;
+  part_of_speech: string | null;
+  example_chinese: string | null;
+  example_pinyin: string | null;
+  example_english: string | null;
 }
 
 // Player state

@@ -13,6 +13,31 @@
   --font-chinese: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
+@keyframes card-flip {
+  0% { transform: rotateY(0deg) scale(1); }
+  50% { transform: rotateY(90deg) scale(0.95); }
+  100% { transform: rotateY(180deg) scale(1); }
+}
+@keyframes card-unflip {
+  0% { transform: rotateY(180deg) scale(1); }
+  50% { transform: rotateY(90deg) scale(0.95); }
+  100% { transform: rotateY(0deg) scale(1); }
+}
+@keyframes drop-zone-pulse {
+  0%, 100% { border-color: rgba(255, 255, 255, 0.2); }
+  50% { border-color: rgba(220, 38, 38, 0.4); }
+}
+
+.card-flip-forward {
+  animation: card-flip 0.5s ease-in-out forwards;
+}
+.card-flip-backward {
+  animation: card-unflip 0.5s ease-in-out forwards;
+}
+.drop-zone-waiting {
+  animation: drop-zone-pulse 2s ease-in-out infinite;
+}
+
 @layer base {
   body {
     background-color: var(--color-bg-primary);

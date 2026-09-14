@@ -19,17 +19,17 @@ export default function SongCard({ rank, title, artist, thumbnailUrl, viewCount,
   return (
     <button
       onClick={onClick}
-      className="group flex w-full items-center gap-4 rounded-xl border border-white/5 bg-bg-card p-3 text-left transition-all hover:border-white/10 hover:bg-bg-card/80"
+      className="group flex w-full items-center gap-2 rounded-xl border border-white/5 bg-bg-card p-3 text-left transition-all hover:border-white/10 hover:bg-bg-card/80 sm:gap-4"
     >
       {/* Rank */}
-      <span className={`w-8 text-center text-lg font-bold ${
+      <span className={`w-6 text-center text-base font-bold sm:w-8 sm:text-lg ${
         rank <= 3 ? 'text-china-red' : 'text-text-secondary'
       }`}>
         {rank}
       </span>
 
       {/* Thumbnail */}
-      <div className="relative h-12 w-20 flex-shrink-0 overflow-hidden rounded-lg bg-bg-secondary">
+      <div className="relative hidden h-12 w-20 flex-shrink-0 overflow-hidden rounded-lg bg-bg-secondary sm:block">
         {thumbnailUrl ? (
           <img src={thumbnailUrl} alt={title} className="h-full w-full object-cover" />
         ) : (

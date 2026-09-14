@@ -6,9 +6,10 @@ interface VocabularyListProps {
   words: SavedWord[];
   loading: boolean;
   onDelete: (id: string) => void;
+  onWordUpdated: (updated: SavedWord) => void;
 }
 
-export default function VocabularyList({ words, loading, onDelete }: VocabularyListProps) {
+export default function VocabularyList({ words, loading, onDelete, onWordUpdated }: VocabularyListProps) {
   if (loading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
@@ -32,7 +33,7 @@ export default function VocabularyList({ words, loading, onDelete }: VocabularyL
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {words.map((word) => (
-        <VocabularyCard key={word.id} word={word} onDelete={onDelete} />
+        <VocabularyCard key={word.id} word={word} onDelete={onDelete} onWordUpdated={onWordUpdated} />
       ))}
     </div>
   );

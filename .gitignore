@@ -33,3 +33,13 @@ dist-ssr
 
 # Supabase local
 supabase/.temp/
+
+# Catalog bootstrap (generated data + run logs)
+data/
+import_log.jsonl
+dist.tar.gz
+
+# Contains VPS credentials - never commit
+deploy-to-vps.cjs
+*.tar.gz
+

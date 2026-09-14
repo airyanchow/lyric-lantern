@@ -8,6 +8,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY – auto-provided by Supabase
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { preCheck, postCheck } from "./quality-gates.ts";
 
 // ─── CORS headers ───────────────────────────────────────────────────────────
 const corsHeaders = {
@@ -34,11 +35,28 @@ interface LyricLine {
 }
 
 // ─── 1. Fetch YouTube metadata ──────────────────────────────────────────────
+// ISO 8601 duration (e.g. "PT4M13S") → seconds
+function parseISODuration(iso: string): number | null {
+  const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso || "");
+  if (!m) return null;
+  const [, h, mn, s] = m;
+  return (Number(h) || 0) * 3600 + (Number(mn) || 0) * 60 + (Number(s) || 0);
+}
+
+interface YouTubeMetadata {
+  title: string;
+  artist: string;
+  thumbnailUrl: string;
+  durationSec: number | null;
+  embeddable: boolean;
+  privacyStatus: string;
+}
+
 async function fetchYouTubeMetadata(
   videoId: string,
   apiKey: string
-): Promise<{ title: string; artist: string; thumbnailUrl: string }> {
-  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
+): Promise<YouTubeMetadata> {
+  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,status,contentDetails&id=${videoId}&key=${apiKey}`;
   const res = await fetch(url);
 
   if (!res.ok) {
@@ -53,6 +71,8 @@ async function fetchYouTubeMetadata(
   }
 
   const snippet = data.items[0].snippet;
+  const status = data.items[0].status || {};
+  const contentDetails = data.items[0].contentDetails || {};
   return {
     title: snippet.title || "Unknown Song",
     artist: snippet.channelTitle || "Unknown Artist",
@@ -62,6 +82,9 @@ async function fetchYouTubeMetadata(
       snippet.thumbnails?.medium?.url ||
       snippet.thumbnails?.default?.url ||
       "",
+    durationSec: parseISODuration(contentDetails.duration || ""),
+    embeddable: status.embeddable !== false,
+    privacyStatus: status.privacyStatus || "public",
   };
 }
 
@@ -802,7 +825,22 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { videoId, youtubeUrl, userLyrics, userLyricsMode } = await req.json();
+    const {
+      videoId,
+      youtubeUrl,
+      userLyrics,
+      userLyricsMode,
+      bulkImport,
+      category,
+      releaseYear,
+    } = await req.json();
+    const isBulk = bulkImport === true;
+    const bulkCategory: string | null =
+      category === "mandopop" || category === "kids" ? category : null;
+    const bulkYear: number | null =
+      typeof releaseYear === "number" && releaseYear > 1900 && releaseYear < 2100
+        ? releaseYear
+        : null;
 
     if (!videoId || typeof videoId !== "string" || !/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
       return new Response(
@@ -860,6 +898,10 @@ Deno.serve(async (req: Request) => {
     let title = "Unknown Song";
     let artist = "Unknown Artist";
     let thumbnailUrl = "";
+    let channelTitle = "Unknown Artist";
+    let durationSec: number | null = null;
+    let embeddable = true;
+    let privacyStatus = "public";
 
     let youtubeError = "";
     if (youtubeKey) {
@@ -867,8 +909,12 @@ Deno.serve(async (req: Request) => {
         const meta = await fetchYouTubeMetadata(videoId, youtubeKey);
         title = meta.title;
         artist = meta.artist;
+        channelTitle = meta.artist;
         thumbnailUrl = meta.thumbnailUrl;
-        console.log(`YouTube metadata: "${title}" by ${artist}`);
+        durationSec = meta.durationSec;
+        embeddable = meta.embeddable;
+        privacyStatus = meta.privacyStatus;
+        console.log(`YouTube metadata: "${title}" by ${artist} (${durationSec}s, embed=${embeddable})`);
 
         // If the channel is a music aggregator, try to extract real artist from title
         const titleArtist = extractArtistFromTitle(title, artist);
@@ -893,6 +939,43 @@ Deno.serve(async (req: Request) => {
         }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Pre-check (bulk import only): reject duds before paying for OpenAI processing.
+    if (isBulk) {
+      const pre = preCheck({ title, channelTitle, durationSec, embeddable, privacyStatus });
+      if (!pre.ok) {
+        console.log(`Pre-check rejected: ${pre.reasons.join(", ")}`);
+        // Negative-cache: write a stub row so the importer skip-set knows to pass on it.
+        await supabase.rpc("insert_processed_song", {
+          p_video_id: videoId,
+          p_youtube_url: youtubeUrl || `https://www.youtube.com/watch?v=${videoId}`,
+          p_title: title,
+          p_artist: artist,
+          p_duration_ms: durationSec != null ? durationSec * 1000 : null,
+          p_thumbnail: thumbnailUrl,
+          p_lyrics: [],
+        });
+        await supabase.rpc("set_song_metadata", {
+          p_video_id: videoId,
+          p_category: bulkCategory,
+          p_release_year: bulkYear,
+          p_quality_status: "rejected",
+          p_quality_score: 0,
+          p_quality_reasons: pre.reasons,
+          p_quality_source: "pre_check",
+          p_auto_publish: false,
+        });
+        return new Response(
+          JSON.stringify({
+            video_id: videoId,
+            quality_status: "rejected",
+            quality_reasons: pre.reasons,
+            phase: "pre_check",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Step 2: Multi-source lyrics search (LRCLIB → NetEase → YouTube Captions → AI)
@@ -1106,11 +1189,42 @@ Deno.serve(async (req: Request) => {
       view_count: 0,
     };
 
-    console.log(`Successfully processed and cached: "${title}"`);
+    // Quality verdict + publish decision.
+    //   Bulk import → run postCheck; auto_publish=false (calibration window).
+    //   User-facing (URL paste or lyrics submission) → trust the existing flow; auto-publish.
+    const verdict = isBulk
+      ? postCheck({ lyrics, lyricsSource })
+      : { status: "passed" as const, score: 1.0, reasons: [] as string[] };
 
-    return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    try {
+      await supabase.rpc("set_song_metadata", {
+        p_video_id: videoId,
+        p_category: bulkCategory,
+        p_release_year: bulkYear,
+        p_quality_status: verdict.status,
+        p_quality_score: verdict.score,
+        p_quality_reasons: verdict.reasons,
+        p_quality_source: lyricsSource,
+        p_auto_publish: !isBulk,
+      });
+    } catch (e) {
+      console.warn("set_song_metadata failed (non-fatal):", e);
+    }
+
+    console.log(
+      `Successfully processed "${title}" (source=${lyricsSource}, status=${verdict.status}, score=${verdict.score.toFixed(2)})`
+    );
+
+    return new Response(
+      JSON.stringify({
+        ...result,
+        quality_status: verdict.status,
+        quality_score: verdict.score,
+        quality_reasons: verdict.reasons,
+        lyrics_source: lyricsSource,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (err) {
     console.error("Edge function error:", err);
     return new Response(

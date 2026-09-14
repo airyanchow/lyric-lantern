@@ -27,6 +27,7 @@ export default function TopSongsList({ onSongSelect }: TopSongsListProps) {
         const { data } = await supabase
           .from('songs')
           .select('id, video_id, title, artist, thumbnail_url, view_count, youtube_url')
+          .eq('is_published', true)
           .order('view_count', { ascending: false })
           .limit(100);
 

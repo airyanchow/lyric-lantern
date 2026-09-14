@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head><title>Logo Converter</title></head>
+<body style="margin:0;padding:20px;background:#111;">
+<h3 style="color:white;font-family:sans-serif;">Right-click the image below and "Save image as..." to download the 120x120 PNG</h3>
+<canvas id="c" width="120" height="120" style="border:1px solid #333;"></canvas>
+<br><br>
+<img id="img" style="border:1px solid #333;">
+<script>
+const svg = `<svg viewBox="0 0 64 96" width="120" height="120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="96" fill="#111827" rx="12"/>
+  <line x1="32" y1="4" x2="32" y2="16" stroke="#D4A017" stroke-width="2.5" stroke-linecap="round"/>
+  <rect x="22" y="16" width="20" height="5" rx="2" fill="#D4A017"/>
+  <ellipse cx="32" cy="40" rx="18" ry="18" fill="#DC2626"/>
+  <ellipse cx="32" cy="40" rx="18" ry="18" fill="none" stroke="#D4A017" stroke-width="2"/>
+  <ellipse cx="32" cy="40" rx="9" ry="18" fill="none" stroke="#D4A017" stroke-width="1.5"/>
+  <rect x="22" y="56" width="20" height="5" rx="2" fill="#D4A017"/>
+  <circle cx="32" cy="66" r="3" fill="none" stroke="#D4A017" stroke-width="1.5"/>
+  <line x1="32" y1="69" x2="32" y2="72" stroke="#D4A017" stroke-width="2"/>
+  <line x1="28" y1="72" x2="28" y2="82" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="30" y1="72" x2="30" y2="84" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="32" y1="72" x2="32" y2="85" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="34" y1="72" x2="34" y2="84" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="36" y1="72" x2="36" y2="82" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round"/>
+</svg>`;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const img = new Image();
+const blob = new Blob([svg], {type: 'image/svg+xml'});
+const url = URL.createObjectURL(blob);
+img.onload = () => {
+  ctx.drawImage(img, 0, 0, 120, 120);
+  URL.revokeObjectURL(url);
+  document.getElementById('img').src = canvas.toDataURL('image/png');
+  // Auto-download
+  const a = document.createElement('a');
+  a.download = 'lyriclantern-logo-120x120.png';
+  a.href = canvas.toDataURL('image/png');
+  a.click();
+};
+img.src = url;
+</script>
+</body>
+</html>
