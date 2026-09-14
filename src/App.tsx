@@ -15,6 +15,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const PlaylistsPage = lazy(() => import('./pages/PlaylistsPage'));
 const PlaylistDetailPage = lazy(() => import('./pages/PlaylistDetailPage'));
 const SentenceBuilderPage = lazy(() => import('./pages/SentenceBuilderPage'));
+const Top20Page = lazy(() => import('./pages/Top20Page'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const TermsPage = lazy(() => import('./pages/TermsPage'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <HomePage /> },
       { path: 'browse', element: <LazyPage><BrowsePage /></LazyPage> },
+      { path: 'top20', element: <LazyPage><Top20Page /></LazyPage> },
       { path: 'login', element: <LoginPage /> },
       {
         path: 'vocabulary',

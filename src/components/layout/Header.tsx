@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BookOpen, TrendingUp, LogIn, LogOut, User, ShieldCheck, Layers, BarChart3, ListMusic, Menu, X } from 'lucide-react';
+import { Award, BookOpen, TrendingUp, LogIn, LogOut, User, ShieldCheck, Layers, BarChart3, ListMusic, Menu, X } from 'lucide-react';
 import ChineseLantern from '../icons/ChineseLantern';
 import { useAuth } from '../../hooks/useAuth';
 import { useAdmin } from '../../hooks/useAdmin';
@@ -57,6 +57,9 @@ export default function Header() {
         <nav className="hidden items-center gap-1 md:flex">
           <Link to="/browse" className={NAV_LINK}>
             <TrendingUp className="h-4 w-4" /> Browse Songs
+          </Link>
+          <Link to="/top20" className={NAV_LINK}>
+            <Award className="h-4 w-4" /> Top 20
           </Link>
           {user && (
             <>
@@ -131,6 +134,9 @@ export default function Header() {
           <nav className="mx-auto max-w-7xl space-y-1 px-4 py-3">
             <Link to="/browse" className={MOBILE_NAV_LINK}>
               <TrendingUp className="h-4 w-4" /> Browse Songs
+            </Link>
+            <Link to="/top20" className={MOBILE_NAV_LINK}>
+              <Award className="h-4 w-4" /> Top 20
             </Link>
             {user && (
               <>
